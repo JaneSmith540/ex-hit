@@ -1,0 +1,937 @@
+{
+  "run_id": "morning_board_final_20260420_models",
+  "config": "config_morning_board_eventstudy.yaml",
+  "models": [
+    "linear",
+    "lasso",
+    "ridge",
+    "elastic_net",
+    "random_forest",
+    "lightgbm",
+    "xgboost",
+    "linear_ensemble",
+    "tree_ensemble"
+  ],
+  "data_info": {
+    "n_train": 22966,
+    "n_test": 3056,
+    "n_features": 29,
+    "n_train_raw": 26606,
+    "n_test_raw": 3488,
+    "feature_names": [
+      "return_rate",
+      "return_speed",
+      "volatility",
+      "price_position",
+      "volume_ratio",
+      "volume_surge",
+      "active_buy_ratio",
+      "net_inflow",
+      "large_order_ratio",
+      "l2_limit_count_ratio",
+      "l2_limit_volume_ratio",
+      "l2_buy_count_ratio",
+      "l2_buy_volume_ratio",
+      "l2_net_order_flow",
+      "l2_large_order_volume_ratio",
+      "ma_slope",
+      "rsi_short",
+      "momentum",
+      "limit_order_count",
+      "limit_order_volume",
+      "touch_time_minutes",
+      "touch_seconds_from_open_norm",
+      "touch_time_bucket",
+      "prior_limit_up_streak",
+      "board_position",
+      "market_prior_touch_count",
+      "market_prior_touch_ratio",
+      "market_total_count",
+      "prev_market_max_close_limit_streak"
+    ]
+  },
+  "results": {
+    "linear": {
+      "status": "ok",
+      "metrics": {
+        "mse": 0.0023378092099345625,
+        "mae": 0.036732344230826615,
+        "r2": 0.014466204080390344,
+        "ic": 0.13449039417342867,
+        "rank_ic": 0.14117070988088454
+      },
+      "prediction_stats": {
+        "mean": -0.004861655034997883,
+        "std": 0.009080046434346635,
+        "min": -0.0875717922728238,
+        "max": 0.04056685095755101
+      },
+      "top_features": [
+        {
+          "feature": "l2_large_order_volume_ratio",
+          "importance": 2479.767952466034
+        },
+        {
+          "feature": "large_order_ratio",
+          "importance": 2479.766713138172
+        },
+        {
+          "feature": "touch_seconds_from_open_norm",
+          "importance": 0.7812536131522128
+        },
+        {
+          "feature": "touch_time_minutes",
+          "importance": 0.7768468774192275
+        },
+        {
+          "feature": "active_buy_ratio",
+          "importance": 0.0074676352322844
+        },
+        {
+          "feature": "return_rate",
+          "importance": 0.003163610646168715
+        },
+        {
+          "feature": "touch_time_bucket",
+          "importance": 0.0027693711700422867
+        },
+        {
+          "feature": "l2_buy_volume_ratio",
+          "importance": 0.0024231435135553133
+        },
+        {
+          "feature": "l2_net_order_flow",
+          "importance": 0.002422525966530458
+        },
+        {
+          "feature": "limit_order_count",
+          "importance": 0.002349140480473692
+        },
+        {
+          "feature": "net_inflow",
+          "importance": 0.0019658145834650217
+        },
+        {
+          "feature": "volume_ratio",
+          "importance": 0.0019197880537876505
+        },
+        {
+          "feature": "board_position",
+          "importance": 0.0018795813706101803
+        },
+        {
+          "feature": "prior_limit_up_streak",
+          "importance": 0.0018795405405714128
+        },
+        {
+          "feature": "market_total_count",
+          "importance": 0.001648163440088029
+        },
+        {
+          "feature": "market_prior_touch_count",
+          "importance": 0.0015869035167382047
+        },
+        {
+          "feature": "volatility",
+          "importance": 0.0013753216000831814
+        },
+        {
+          "feature": "l2_limit_count_ratio",
+          "importance": 0.0012756206152709588
+        },
+        {
+          "feature": "l2_buy_count_ratio",
+          "importance": 0.0009601226246329256
+        },
+        {
+          "feature": "l2_limit_volume_ratio",
+          "importance": 0.0007368482029193011
+        }
+      ]
+    },
+    "lasso": {
+      "status": "ok",
+      "metrics": {
+        "mse": 0.0023518366795063886,
+        "mae": 0.036909782863372785,
+        "r2": 0.008552742333588825,
+        "ic": 0.1058181898869131,
+        "rank_ic": 0.11424719708284878
+      },
+      "prediction_stats": {
+        "mean": -0.005886058408248396,
+        "std": 0.005124430646249853,
+        "min": -0.035787166682525205,
+        "max": 0.018956963009404595
+      },
+      "top_features": [
+        {
+          "feature": "prior_limit_up_streak",
+          "importance": 0.003017509958361491
+        },
+        {
+          "feature": "active_buy_ratio",
+          "importance": 0.0028672756150469347
+        },
+        {
+          "feature": "volume_ratio",
+          "importance": 0.0014980263841461578
+        },
+        {
+          "feature": "return_rate",
+          "importance": 0.001329608985208262
+        },
+        {
+          "feature": "volatility",
+          "importance": 0.0011990982451000319
+        },
+        {
+          "feature": "market_total_count",
+          "importance": 0.0008497938439664307
+        },
+        {
+          "feature": "l2_limit_count_ratio",
+          "importance": 0.0004906496456715768
+        },
+        {
+          "feature": "l2_buy_count_ratio",
+          "importance": 0.00025666396985804535
+        },
+        {
+          "feature": "limit_order_count",
+          "importance": 0.00021439666908532973
+        },
+        {
+          "feature": "volume_surge",
+          "importance": 0.00010440028321975874
+        },
+        {
+          "feature": "l2_large_order_volume_ratio",
+          "importance": 4.843387202862601e-05
+        },
+        {
+          "feature": "large_order_ratio",
+          "importance": 2.0843585131082774e-05
+        },
+        {
+          "feature": "rsi_short",
+          "importance": 1.9797340122427862e-05
+        },
+        {
+          "feature": "board_position",
+          "importance": 2.6298063458858825e-18
+        },
+        {
+          "feature": "l2_buy_volume_ratio",
+          "importance": 0.0
+        },
+        {
+          "feature": "net_inflow",
+          "importance": 0.0
+        },
+        {
+          "feature": "price_position",
+          "importance": 0.0
+        },
+        {
+          "feature": "return_speed",
+          "importance": 0.0
+        },
+        {
+          "feature": "l2_limit_volume_ratio",
+          "importance": 0.0
+        },
+        {
+          "feature": "ma_slope",
+          "importance": 0.0
+        }
+      ]
+    },
+    "ridge": {
+      "status": "ok",
+      "metrics": {
+        "mse": 0.002336929342283716,
+        "mae": 0.036731764863638224,
+        "r2": 0.014837123701273547,
+        "ic": 0.13542077312151532,
+        "rank_ic": 0.14192834443619676
+      },
+      "prediction_stats": {
+        "mean": -0.004876283121705423,
+        "std": 0.009059740480525146,
+        "min": -0.08750785973513389,
+        "max": 0.04057102925952709
+      },
+      "top_features": [
+        {
+          "feature": "active_buy_ratio",
+          "importance": 0.00745636117094467
+        },
+        {
+          "feature": "return_rate",
+          "importance": 0.0031663110418973773
+        },
+        {
+          "feature": "touch_time_bucket",
+          "importance": 0.0027386406477407457
+        },
+        {
+          "feature": "l2_net_order_flow",
+          "importance": 0.0024161794526162484
+        },
+        {
+          "feature": "l2_buy_volume_ratio",
+          "importance": 0.0024161794525891867
+        },
+        {
+          "feature": "touch_seconds_from_open_norm",
+          "importance": 0.0023608103336486474
+        },
+        {
+          "feature": "limit_order_count",
+          "importance": 0.0023417425960518793
+        },
+        {
+          "feature": "touch_time_minutes",
+          "importance": 0.002013210836295367
+        },
+        {
+          "feature": "net_inflow",
+          "importance": 0.0019449680334583273
+        },
+        {
+          "feature": "volume_ratio",
+          "importance": 0.0019165189431509003
+        },
+        {
+          "feature": "board_position",
+          "importance": 0.0018802693399490218
+        },
+        {
+          "feature": "prior_limit_up_streak",
+          "importance": 0.001880269339941503
+        },
+        {
+          "feature": "market_total_count",
+          "importance": 0.0016604137568215027
+        },
+        {
+          "feature": "market_prior_touch_count",
+          "importance": 0.001443701748301503
+        },
+        {
+          "feature": "volatility",
+          "importance": 0.001374456060268566
+        },
+        {
+          "feature": "l2_limit_count_ratio",
+          "importance": 0.001277606344171246
+        },
+        {
+          "feature": "l2_buy_count_ratio",
+          "importance": 0.0009561551303357641
+        },
+        {
+          "feature": "l2_limit_volume_ratio",
+          "importance": 0.0007432878127290271
+        },
+        {
+          "feature": "l2_large_order_volume_ratio",
+          "importance": 0.0006204621687924391
+        },
+        {
+          "feature": "price_position",
+          "importance": 0.0006184765835739102
+        }
+      ]
+    },
+    "elastic_net": {
+      "status": "ok",
+      "metrics": {
+        "mse": 0.002376494929316901,
+        "mae": 0.03728887372636676,
+        "r2": -0.0018422627135374903,
+        "ic": NaN,
+        "rank_ic": NaN
+      },
+      "prediction_stats": {
+        "mean": -0.00547197423453269,
+        "std": 0.0,
+        "min": -0.00547197423453269,
+        "max": -0.00547197423453269
+      },
+      "top_features": [
+        {
+          "feature": "return_rate",
+          "importance": 0.0
+        },
+        {
+          "feature": "return_speed",
+          "importance": 0.0
+        },
+        {
+          "feature": "volatility",
+          "importance": 0.0
+        },
+        {
+          "feature": "price_position",
+          "importance": 0.0
+        },
+        {
+          "feature": "volume_ratio",
+          "importance": 0.0
+        },
+        {
+          "feature": "volume_surge",
+          "importance": 0.0
+        },
+        {
+          "feature": "active_buy_ratio",
+          "importance": 0.0
+        },
+        {
+          "feature": "net_inflow",
+          "importance": 0.0
+        },
+        {
+          "feature": "large_order_ratio",
+          "importance": 0.0
+        },
+        {
+          "feature": "l2_limit_count_ratio",
+          "importance": 0.0
+        },
+        {
+          "feature": "l2_limit_volume_ratio",
+          "importance": 0.0
+        },
+        {
+          "feature": "l2_buy_count_ratio",
+          "importance": 0.0
+        },
+        {
+          "feature": "l2_buy_volume_ratio",
+          "importance": 0.0
+        },
+        {
+          "feature": "l2_net_order_flow",
+          "importance": 0.0
+        },
+        {
+          "feature": "l2_large_order_volume_ratio",
+          "importance": 0.0
+        },
+        {
+          "feature": "ma_slope",
+          "importance": 0.0
+        },
+        {
+          "feature": "rsi_short",
+          "importance": 0.0
+        },
+        {
+          "feature": "momentum",
+          "importance": 0.0
+        },
+        {
+          "feature": "limit_order_count",
+          "importance": 0.0
+        },
+        {
+          "feature": "limit_order_volume",
+          "importance": 0.0
+        }
+      ]
+    },
+    "random_forest": {
+      "status": "ok",
+      "metrics": {
+        "mse": 0.0022971107206999435,
+        "mae": 0.03632441430798498,
+        "r2": 0.031623180112968496,
+        "ic": 0.1824228628894194,
+        "rank_ic": 0.1501438835714911
+      },
+      "prediction_stats": {
+        "mean": -0.004994107368750333,
+        "std": 0.010035972608762985,
+        "min": -0.059443791481281275,
+        "max": 0.02484361676846862
+      },
+      "top_features": [
+        {
+          "feature": "volume_surge",
+          "importance": 0.0885668627057766
+        },
+        {
+          "feature": "volatility",
+          "importance": 0.06329572028933421
+        },
+        {
+          "feature": "return_rate",
+          "importance": 0.059209533596648614
+        },
+        {
+          "feature": "return_speed",
+          "importance": 0.0559240521984207
+        },
+        {
+          "feature": "active_buy_ratio",
+          "importance": 0.04987842336780876
+        },
+        {
+          "feature": "net_inflow",
+          "importance": 0.047023447901595225
+        },
+        {
+          "feature": "market_total_count",
+          "importance": 0.04492851272079728
+        },
+        {
+          "feature": "l2_buy_count_ratio",
+          "importance": 0.042766243593695505
+        },
+        {
+          "feature": "volume_ratio",
+          "importance": 0.04241212575212442
+        },
+        {
+          "feature": "l2_limit_volume_ratio",
+          "importance": 0.041413820566928064
+        },
+        {
+          "feature": "market_prior_touch_ratio",
+          "importance": 0.04121600196823004
+        },
+        {
+          "feature": "limit_order_volume",
+          "importance": 0.03898344971632019
+        },
+        {
+          "feature": "l2_limit_count_ratio",
+          "importance": 0.03862281124224184
+        },
+        {
+          "feature": "limit_order_count",
+          "importance": 0.03772003310577467
+        },
+        {
+          "feature": "large_order_ratio",
+          "importance": 0.03667685140014943
+        },
+        {
+          "feature": "l2_large_order_volume_ratio",
+          "importance": 0.032455913954988466
+        },
+        {
+          "feature": "board_position",
+          "importance": 0.027311810059167635
+        },
+        {
+          "feature": "touch_seconds_from_open_norm",
+          "importance": 0.02672291587092224
+        },
+        {
+          "feature": "prior_limit_up_streak",
+          "importance": 0.025652590368728603
+        },
+        {
+          "feature": "ma_slope",
+          "importance": 0.024735861279899997
+        }
+      ]
+    },
+    "lightgbm": {
+      "status": "ok",
+      "metrics": {
+        "mse": 0.0025335825357143656,
+        "mae": 0.038361131545247625,
+        "r2": -0.06806458075682742,
+        "ic": 0.12843830133615683,
+        "rank_ic": 0.11650479461157759
+      },
+      "prediction_stats": {
+        "mean": 0.008715513338142864,
+        "std": 0.013621076001909488,
+        "min": -0.07553659626955524,
+        "max": 0.05587533771405307
+      },
+      "top_features": [
+        {
+          "feature": "market_total_count",
+          "importance": 517
+        },
+        {
+          "feature": "volatility",
+          "importance": 327
+        },
+        {
+          "feature": "return_rate",
+          "importance": 292
+        },
+        {
+          "feature": "active_buy_ratio",
+          "importance": 253
+        },
+        {
+          "feature": "net_inflow",
+          "importance": 244
+        },
+        {
+          "feature": "return_speed",
+          "importance": 244
+        },
+        {
+          "feature": "limit_order_count",
+          "importance": 239
+        },
+        {
+          "feature": "large_order_ratio",
+          "importance": 235
+        },
+        {
+          "feature": "l2_buy_count_ratio",
+          "importance": 232
+        },
+        {
+          "feature": "volume_ratio",
+          "importance": 230
+        },
+        {
+          "feature": "volume_surge",
+          "importance": 229
+        },
+        {
+          "feature": "ma_slope",
+          "importance": 222
+        },
+        {
+          "feature": "limit_order_volume",
+          "importance": 216
+        },
+        {
+          "feature": "l2_limit_count_ratio",
+          "importance": 204
+        },
+        {
+          "feature": "l2_limit_volume_ratio",
+          "importance": 198
+        },
+        {
+          "feature": "touch_time_minutes",
+          "importance": 193
+        },
+        {
+          "feature": "prior_limit_up_streak",
+          "importance": 187
+        },
+        {
+          "feature": "prev_market_max_close_limit_streak",
+          "importance": 182
+        },
+        {
+          "feature": "rsi_short",
+          "importance": 181
+        },
+        {
+          "feature": "l2_buy_volume_ratio",
+          "importance": 178
+        }
+      ]
+    },
+    "xgboost": {
+      "status": "ok",
+      "metrics": {
+        "mse": 0.002338339988060775,
+        "mae": 0.036534278253885125,
+        "r2": 0.01424244767661953,
+        "ic": 0.16250601150311828,
+        "rank_ic": 0.1510455482367131
+      },
+      "prediction_stats": {
+        "mean": 0.00037651200545951724,
+        "std": 0.011753521859645844,
+        "min": -0.06788258999586105,
+        "max": 0.04438525438308716
+      },
+      "top_features": [
+        {
+          "feature": "volume_surge",
+          "importance": 0.05258884280920029
+        },
+        {
+          "feature": "prior_limit_up_streak",
+          "importance": 0.049564361572265625
+        },
+        {
+          "feature": "board_position",
+          "importance": 0.0466940701007843
+        },
+        {
+          "feature": "large_order_ratio",
+          "importance": 0.03953450173139572
+        },
+        {
+          "feature": "active_buy_ratio",
+          "importance": 0.039153680205345154
+        },
+        {
+          "feature": "return_speed",
+          "importance": 0.038150593638420105
+        },
+        {
+          "feature": "market_total_count",
+          "importance": 0.03596813604235649
+        },
+        {
+          "feature": "volatility",
+          "importance": 0.035864222794771194
+        },
+        {
+          "feature": "l2_limit_count_ratio",
+          "importance": 0.03567696362733841
+        },
+        {
+          "feature": "net_inflow",
+          "importance": 0.03547130152583122
+        },
+        {
+          "feature": "l2_large_order_volume_ratio",
+          "importance": 0.03486023470759392
+        },
+        {
+          "feature": "limit_order_count",
+          "importance": 0.0347241535782814
+        },
+        {
+          "feature": "volume_ratio",
+          "importance": 0.03471757844090462
+        },
+        {
+          "feature": "momentum",
+          "importance": 0.034216493368148804
+        },
+        {
+          "feature": "market_prior_touch_ratio",
+          "importance": 0.034181639552116394
+        },
+        {
+          "feature": "touch_seconds_from_open_norm",
+          "importance": 0.03258196637034416
+        },
+        {
+          "feature": "return_rate",
+          "importance": 0.03243064135313034
+        },
+        {
+          "feature": "ma_slope",
+          "importance": 0.03191806375980377
+        },
+        {
+          "feature": "market_prior_touch_count",
+          "importance": 0.03168114274740219
+        },
+        {
+          "feature": "l2_limit_volume_ratio",
+          "importance": 0.03115059621632099
+        }
+      ]
+    },
+    "linear_ensemble": {
+      "status": "ok",
+      "metrics": {
+        "mse": 0.0023397966033212292,
+        "mae": 0.03679244727077552,
+        "r2": 0.013628392619975283,
+        "ic": 0.12870314130637786,
+        "rank_ic": 0.13618157874864914
+      },
+      "prediction_stats": {
+        "mean": -0.0054114385881621685,
+        "std": 0.004581952487413811,
+        "min": -0.04065464316262573,
+        "max": 0.0126203453667526
+      },
+      "top_features": [
+        {
+          "feature": "active_buy_ratio",
+          "importance": 0.003441212261997201
+        },
+        {
+          "feature": "prior_limit_up_streak",
+          "importance": 0.0016325930994343313
+        },
+        {
+          "feature": "return_rate",
+          "importance": 0.0014986400090352132
+        },
+        {
+          "feature": "volume_ratio",
+          "importance": 0.0011381817757656861
+        },
+        {
+          "feature": "touch_time_bucket",
+          "importance": 0.0009128802159135819
+        },
+        {
+          "feature": "volatility",
+          "importance": 0.000857851435122866
+        },
+        {
+          "feature": "limit_order_count",
+          "importance": 0.0008520464217124029
+        },
+        {
+          "feature": "market_total_count",
+          "importance": 0.0008367358669293111
+        },
+        {
+          "feature": "l2_net_order_flow",
+          "importance": 0.0008053931508720828
+        },
+        {
+          "feature": "l2_buy_volume_ratio",
+          "importance": 0.0008053931508630622
+        },
+        {
+          "feature": "touch_seconds_from_open_norm",
+          "importance": 0.0007869367778828825
+        },
+        {
+          "feature": "touch_time_minutes",
+          "importance": 0.0006710702787651223
+        },
+        {
+          "feature": "net_inflow",
+          "importance": 0.0006483226778194424
+        },
+        {
+          "feature": "board_position",
+          "importance": 0.0006267564466496748
+        },
+        {
+          "feature": "l2_limit_count_ratio",
+          "importance": 0.0005894186632809409
+        },
+        {
+          "feature": "market_prior_touch_count",
+          "importance": 0.000481233916100501
+        },
+        {
+          "feature": "l2_buy_count_ratio",
+          "importance": 0.00040427303339793646
+        },
+        {
+          "feature": "l2_limit_volume_ratio",
+          "importance": 0.00024776260424300904
+        },
+        {
+          "feature": "l2_large_order_volume_ratio",
+          "importance": 0.00022296534694035504
+        },
+        {
+          "feature": "volume_surge",
+          "importance": 0.00022007386363109873
+        }
+      ]
+    },
+    "tree_ensemble": {
+      "status": "ok",
+      "metrics": {
+        "mse": 0.0023239533804410976,
+        "mae": 0.036513574747377195,
+        "r2": 0.02030730872583386,
+        "ic": 0.17646270961099886,
+        "rank_ic": 0.1537240528706312
+      },
+      "prediction_stats": {
+        "mean": 0.0013659726474661083,
+        "std": 0.010370985611742604,
+        "min": -0.06604394655056647,
+        "max": 0.03708596630170247
+      },
+      "top_features": [
+        {
+          "feature": "market_total_count",
+          "importance": 172.36029888292106
+        },
+        {
+          "feature": "volatility",
+          "importance": 109.03305331436137
+        },
+        {
+          "feature": "return_rate",
+          "importance": 97.36388005831658
+        },
+        {
+          "feature": "active_buy_ratio",
+          "importance": 84.36301070119104
+        },
+        {
+          "feature": "return_speed",
+          "importance": 81.36469154861227
+        },
+        {
+          "feature": "net_inflow",
+          "importance": 81.36083158314248
+        },
+        {
+          "feature": "limit_order_count",
+          "importance": 79.6908147288947
+        },
+        {
+          "feature": "large_order_ratio",
+          "importance": 78.35873711771052
+        },
+        {
+          "feature": "l2_buy_count_ratio",
+          "importance": 77.35776278575321
+        },
+        {
+          "feature": "volume_ratio",
+          "importance": 76.69237656806435
+        },
+        {
+          "feature": "volume_surge",
+          "importance": 76.38038523517166
+        },
+        {
+          "feature": "ma_slope",
+          "importance": 74.0188846416799
+        },
+        {
+          "feature": "limit_order_volume",
+          "importance": 72.02330650215478
+        },
+        {
+          "feature": "l2_limit_count_ratio",
+          "importance": 68.02476659162319
+        },
+        {
+          "feature": "l2_limit_volume_ratio",
+          "importance": 66.02418813892776
+        },
+        {
+          "feature": "touch_time_minutes",
+          "importance": 64.34967412379434
+        },
+        {
+          "feature": "prior_limit_up_streak",
+          "importance": 62.358405650647
+        },
+        {
+          "feature": "prev_market_max_close_limit_streak",
+          "importance": 60.68425920739998
+        },
+        {
+          "feature": "rsi_short",
+          "importance": 60.35011940729198
+        },
+        {
+          "feature": "l2_buy_volume_ratio",
+          "importance": 59.34798169642426
+        }
+      ]
+    }
+  }
+}
