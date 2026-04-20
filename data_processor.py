@@ -13,7 +13,13 @@ class DataProcessor:
         self.pro = ts.pro_api(self.config.tushare_token) if self.config.tushare_token else None
         self._tick_cache: Dict[Tuple[str, str], pl.DataFrame] = {}
         self._l2_cache: Dict[str, pl.DataFrame] = {}
+        self._l2_path_cache: Dict[Tuple[str, str], List[Path]] = {}
+        self._l2_interval_folder_cache: Dict[Path, List[Tuple[int, int, Path]]] = {}
+        self._max_l2_cache_frames = 32
         self._min_cache: Dict[str, pl.DataFrame] = {}
+        self._adj_factor_maps: Optional[
+            Tuple[Dict[Tuple[str, str], float], Dict[str, float]]
+        ] = None
 
     def load_data(self, data_path: Optional[str] = None) -> pl.DataFrame:
         path = Path(data_path or self.config.data_path)
@@ -33,17 +39,19 @@ class DataProcessor:
 
         return self._standardize_market_frame(df)
 
-    def _read_parquet_files(self, files: List[Path]) -> pl.DataFrame:
+    def _read_parquet_files(self, files: List[Path], columns: Optional[List[str]] = None) -> pl.DataFrame:
         frames = []
         for file_path in files:
             try:
-                frame = pl.read_parquet(file_path.as_posix())
+                frame = pl.read_parquet(file_path.as_posix(), columns=columns)
                 frames.append(frame)
             except Exception as e:
                 print(f"Warning: Failed to load {file_path}: {e}")
                 continue
         if not frames:
             raise ValueError("No valid parquet files could be loaded")
+        if len(frames) == 1:
+            return frames[0]
         return pl.concat(frames, how="diagonal_relaxed")
 
     def _standardize_market_frame(self, df: pl.DataFrame) -> pl.DataFrame:
@@ -83,14 +91,105 @@ class DataProcessor:
     def _symbol_digits(self, symbol: str) -> str:
         return symbol.split(".")[0]
 
+    def _symbol_core(self, symbol: str) -> str:
+        return self._symbol_digits(symbol).strip().lower()
+
+    def _symbol_numeric_code(self, symbol: str) -> str:
+        return "".join(ch for ch in self._symbol_digits(symbol) if ch.isdigit())
+
+    def _load_adj_factor_maps(self) -> Tuple[Dict[Tuple[str, str], float], Dict[str, float]]:
+        if self._adj_factor_maps is not None:
+            return self._adj_factor_maps
+
+        date_factors: Dict[Tuple[str, str], float] = {}
+        latest_by_symbol: Dict[str, Tuple[str, float]] = {}
+        factor_path = getattr(self.config, "adj_factor_path", None)
+        if not factor_path:
+            self._adj_factor_maps = ({}, {})
+            return self._adj_factor_maps
+
+        try:
+            factors = self.load_adjustment_factors(factor_path)
+        except Exception as exc:
+            print(f"Warning: Failed to load adjustment factors from {factor_path}: {exc}")
+            self._adj_factor_maps = ({}, {})
+            return self._adj_factor_maps
+
+        if factors.is_empty():
+            self._adj_factor_maps = ({}, {})
+            return self._adj_factor_maps
+
+        for row in factors.iter_rows(named=True):
+            symbol_key = self._symbol_numeric_code(str(row["symbol"]))
+            if not symbol_key:
+                continue
+            trade_date = pd.to_datetime(row["datetime"]).strftime("%Y%m%d")
+            factor = float(row["adj_factor"])
+            date_factors[(symbol_key, trade_date)] = factor
+            latest = latest_by_symbol.get(symbol_key)
+            if latest is None or trade_date > latest[0]:
+                latest_by_symbol[symbol_key] = (trade_date, factor)
+
+        latest_factors = {
+            symbol_key: factor for symbol_key, (_, factor) in latest_by_symbol.items()
+        }
+        self._adj_factor_maps = (date_factors, latest_factors)
+        return self._adj_factor_maps
+
+    def _adj_factor_for_date(self, symbol: str, trade_date: str) -> Optional[float]:
+        date_factors, _ = self._load_adj_factor_maps()
+        key = self._symbol_numeric_code(symbol)
+        date_key = pd.to_datetime(str(trade_date)).strftime("%Y%m%d")
+        return date_factors.get((key, date_key))
+
+    def _latest_adj_factor_for_symbol(self, symbol: str) -> Optional[float]:
+        _, latest_factors = self._load_adj_factor_maps()
+        return latest_factors.get(self._symbol_numeric_code(symbol))
+
+    def _scale_price_columns(self, df: pl.DataFrame, columns: List[str], factor: Optional[float]) -> pl.DataFrame:
+        if factor is None or df.is_empty():
+            return df
+        expressions = [
+            (pl.col(col).cast(pl.Float64) * float(factor)).alias(col)
+            for col in columns
+            if col in df.columns
+        ]
+        return df.with_columns(expressions) if expressions else df
+
     def _symbol_market_prefix(self, symbol: str) -> str:
-        digits = self._symbol_digits(symbol)
-        if symbol.endswith(".SH") or digits.startswith("6"):
+        core = self._symbol_core(symbol)
+        if core.startswith(("sh", "sz", "bj")):
+            return core
+
+        digits = self._symbol_numeric_code(symbol)
+        if digits.startswith(("6", "900")):
             return f"sh{digits}"
+        if digits.startswith(("4", "8", "92")):
+            return f"bj{digits}"
         return f"sz{digits}"
 
+    def _min_file_stems(self, symbol: str) -> List[str]:
+        core = self._symbol_core(symbol)
+        digits = self._symbol_numeric_code(symbol)
+        stems = [core]
+
+        if digits:
+            if digits.startswith(("6", "900")):
+                stems.append(f"sh{digits}")
+            elif digits.startswith(("4", "8", "92")):
+                stems.append(f"bj{digits}")
+            else:
+                stems.append(f"sz{digits}")
+            stems.append(digits)
+
+        unique_stems = []
+        for stem in stems:
+            if stem and stem not in unique_stems:
+                unique_stems.append(stem)
+        return unique_stems
+
     def _limit_ratio(self, symbol: str) -> float:
-        digits = self._symbol_digits(symbol)
+        digits = self._symbol_numeric_code(symbol)
         if digits.startswith(("300", "301", "688")):
             return 0.20
         return 0.10
@@ -105,18 +204,123 @@ class DataProcessor:
             / dt.strftime("%Y")
             / dt.strftime("%m")
             / dt.strftime("%Y-%m-%d")
-            / f"{self._symbol_digits(symbol)}.parquet"
+            / f"{self._symbol_numeric_code(symbol)}.parquet"
         )
 
-    def _l2_file_path(self, symbol: str) -> Optional[Path]:
-        digits = self._symbol_digits(symbol)
+    def _l2_interval_folders(self, year_root: Path) -> List[Tuple[int, int, Path]]:
+        if year_root in self._l2_interval_folder_cache:
+            return self._l2_interval_folder_cache[year_root]
+
+        intervals: List[Tuple[int, int, Path]] = []
+        if year_root.exists():
+            for folder in year_root.iterdir():
+                if not folder.is_dir():
+                    continue
+                parts = folder.name.split("_")
+                if len(parts) != 2 or not all(part.isdigit() for part in parts):
+                    continue
+                intervals.append((int(parts[0]), int(parts[1]), folder))
+
+        self._l2_interval_folder_cache[year_root] = intervals
+        return intervals
+
+    def _resolve_l2_file_paths(self, symbol: str, trade_date: str) -> List[Path]:
+        cache_key = (self._symbol_numeric_code(symbol) or self._symbol_core(symbol), pd.to_datetime(str(trade_date)).strftime("%Y%m%d"))
+        if cache_key in self._l2_path_cache:
+            return self._l2_path_cache[cache_key]
+
+        dt = pd.to_datetime(str(trade_date))
+        year = dt.strftime("%Y")
+        trade_key = int(dt.strftime("%Y%m%d"))
         base = Path(self.config.l2_order_path)
-        matches = sorted(base.glob(f"*/*{digits}.parquet"))
-        return matches[0] if matches else None
+        year_root = base / year if (base / year).exists() else base
+        if not year_root.exists():
+            self._l2_path_cache[cache_key] = []
+            return []
+
+        digits = self._symbol_numeric_code(symbol)
+        core = self._symbol_core(symbol)
+        search_terms = [term for term in [digits, core, self._symbol_market_prefix(symbol)] if term]
+
+        direct_matches: List[Path] = []
+        interval_folders = self._l2_interval_folders(year_root)
+        for start_key, end_key, folder in interval_folders:
+            if not (start_key <= trade_key < end_key):
+                continue
+            for term in search_terms:
+                direct_path = folder / f"{term}.parquet"
+                if direct_path.exists():
+                    direct_matches.append(direct_path)
+            self._l2_path_cache[cache_key] = direct_matches
+            return direct_matches
+        if interval_folders:
+            self._l2_path_cache[cache_key] = []
+            return []
+
+        matches: List[Path] = []
+        for term in search_terms:
+            matches.extend(sorted(year_root.rglob(f"*{term}*.parquet")))
+
+        if not matches and digits:
+            matches.extend(sorted(year_root.rglob(f"*.parquet")))
+            matches = [path for path in matches if digits in path.stem or core in path.stem]
+
+        interval_matches: List[Path] = []
+        has_interval_folders = False
+        for path in matches:
+            parts = path.parent.name.split("_")
+            if len(parts) != 2 or not all(part.isdigit() for part in parts):
+                continue
+            has_interval_folders = True
+            start_key, end_key = int(parts[0]), int(parts[1])
+            if start_key <= trade_key < end_key:
+                interval_matches.append(path)
+        if interval_matches:
+            matches = interval_matches
+        elif has_interval_folders:
+            self._l2_path_cache[cache_key] = []
+            return []
+
+        unique_matches: List[Path] = []
+        seen = set()
+        for path in matches:
+            if path not in seen:
+                seen.add(path)
+                unique_matches.append(path)
+        self._l2_path_cache[cache_key] = unique_matches
+        return unique_matches
 
     def _min_file_path(self, symbol: str, trade_date: str) -> Path:
         year = pd.to_datetime(str(trade_date)).strftime("%Y")
-        return Path(self.config.min_path) / f"{self._symbol_market_prefix(symbol)}_{year}.parquet"
+        return Path(self.config.min_path) / f"{year}_1min" / f"{self._symbol_market_prefix(symbol)}_{year}.parquet"
+
+    def _resolve_min_file_path(self, symbol: str, trade_date: str) -> Optional[Path]:
+        year = pd.to_datetime(str(trade_date)).strftime("%Y")
+        base = Path(self.config.min_path)
+        year_root = base / f"{year}_1min"
+        search_roots = [year_root, base]
+        candidate_stems = self._min_file_stems(symbol)
+
+        for root in search_roots:
+            if not root.exists():
+                continue
+            for stem in candidate_stems:
+                direct = root / f"{stem}_{year}.parquet"
+                if direct.exists():
+                    return direct
+                direct_alt = root / f"{stem}.parquet"
+                if direct_alt.exists():
+                    return direct_alt
+
+            for stem in candidate_stems:
+                matches = sorted(root.rglob(f"{stem}_{year}.parquet"))
+                if matches:
+                    return matches[0]
+                matches = sorted(root.rglob(f"{stem}.parquet"))
+                if matches:
+                    return matches[0]
+
+        return None
 
     def load_tick_data(self, symbol: str, trade_date: str) -> pl.DataFrame:
         cache_key = (symbol, str(trade_date))
@@ -137,29 +341,124 @@ class DataProcessor:
         self._tick_cache[cache_key] = frame
         return frame
 
-    def load_l2_data(self, symbol: str) -> pl.DataFrame:
-        if symbol in self._l2_cache:
-            return self._l2_cache[symbol]
+    def load_l2_data(self, symbol: str, trade_date: Optional[str] = None) -> pl.DataFrame:
+        date_key = pd.to_datetime(str(trade_date)).strftime("%Y%m%d") if trade_date else "all"
 
-        path = self._l2_file_path(symbol)
-        if path is None or not path.exists():
-            frame = pl.DataFrame()
+        if trade_date is None:
+            base = Path(self.config.l2_order_path)
+            file_paths = sorted(base.rglob("*.parquet")) if base.exists() else []
         else:
-            try:
-                frame = pl.read_parquet(str(path))
-            except Exception as e:
-                print(f"Warning: Failed to load L2 file {path}: {e}")
-                frame = pl.DataFrame()
-        self._l2_cache[symbol] = frame
+            file_paths = self._resolve_l2_file_paths(symbol, trade_date)
+
+        if not file_paths:
+            return pl.DataFrame()
+
+        cache_key = "|".join(str(path) for path in file_paths)
+        if cache_key in self._l2_cache:
+            frame = self._l2_cache.pop(cache_key)
+            self._l2_cache[cache_key] = frame
+            return frame
+
+        try:
+            l2_columns = ["TradingDay", "OrderTime", "LastPrice", "Price", "Volume", "OrderType"]
+            frame = self._read_parquet_files(file_paths, columns=l2_columns)
+        except Exception as e:
+            print(f"Warning: Failed to load L2 files for {symbol} {date_key}: {e}")
+            frame = pl.DataFrame()
+
+        if len(self._l2_cache) >= self._max_l2_cache_frames:
+            self._l2_cache.pop(next(iter(self._l2_cache)))
+        self._l2_cache[cache_key] = frame
         return frame
+
+    def _l2_order_datetime(self, trading_day: int, order_time: int) -> datetime:
+        time_key = f"{int(order_time):09d}"
+        return datetime(
+            year=int(str(int(trading_day))[:4]),
+            month=int(str(int(trading_day))[4:6]),
+            day=int(str(int(trading_day))[6:8]),
+            hour=int(time_key[:2]),
+            minute=int(time_key[2:4]),
+            second=int(time_key[4:6]),
+            microsecond=int(time_key[6:9]) * 1000,
+        )
+
+    def _l2_datetime_expr(self) -> pl.Expr:
+        trading_day = pl.col("TradingDay").cast(pl.Int64)
+        order_time = pl.col("OrderTime").cast(pl.Int64)
+        return pl.datetime(
+            year=(trading_day // 10000).cast(pl.Int32),
+            month=((trading_day // 100) % 100).cast(pl.Int32),
+            day=(trading_day % 100).cast(pl.Int32),
+            hour=(order_time // 10_000_000).cast(pl.Int32),
+            minute=((order_time // 100_000) % 100).cast(pl.Int32),
+            second=((order_time // 1_000) % 100).cast(pl.Int32),
+            microsecond=((order_time % 1_000) * 1_000).cast(pl.Int32),
+            time_unit="us",
+        )
+
+    def _l2_to_market_frame(self, l2_df: pl.DataFrame, trade_date_key: int) -> pl.DataFrame:
+        required = {"TradingDay", "OrderTime", "LastPrice", "Price", "Volume", "OrderType"}
+        if l2_df.is_empty() or not required.issubset(set(l2_df.columns)):
+            return pl.DataFrame()
+
+        day_l2 = l2_df.filter(pl.col("TradingDay") == trade_date_key)
+        if day_l2.is_empty():
+            return pl.DataFrame()
+
+        return (
+            day_l2.with_columns(
+                [
+                    self._l2_datetime_expr().alias("datetime"),
+                    (pl.col("LastPrice").cast(pl.Float64) / 100.0).alias("current"),
+                    (pl.col("Price").cast(pl.Float64) / 100.0).alias("order_price"),
+                    pl.col("Volume").cast(pl.Float64).alias("volume"),
+                    pl.when(pl.col("OrderType") >= 0).then(pl.lit("b")).otherwise(pl.lit("s")).alias("b/s"),
+                ]
+            )
+            .with_columns(
+                [
+                    pl.col("current").alias("price"),
+                    pl.col("order_price").alias("b1_p"),
+                    pl.col("order_price").alias("a1_p"),
+                    (pl.col("current") * pl.col("volume")).alias("money"),
+                    pl.col("volume").alias("b1_v"),
+                    pl.col("volume").alias("a1_v"),
+                ]
+            )
+            .sort("datetime")
+        )
+
+    def _l2_to_minute_frame(self, l2_market_df: pl.DataFrame) -> pl.DataFrame:
+        if l2_market_df.is_empty() or "datetime" not in l2_market_df.columns:
+            return pl.DataFrame()
+
+        return (
+            l2_market_df.sort("datetime")
+            .with_columns(pl.col("datetime").dt.truncate("1m").alias("minute"))
+            .group_by("minute")
+            .agg(
+                [
+                    pl.col("price").first().alias("open"),
+                    pl.col("price").max().alias("high"),
+                    pl.col("price").min().alias("low"),
+                    pl.col("price").last().alias("close"),
+                    pl.col("volume").sum().alias("volume"),
+                    pl.col("money").sum().alias("amount"),
+                ]
+            )
+            .rename({"minute": "datetime"})
+            .with_columns(pl.col("close").alias("price"))
+            .sort("datetime")
+        )
 
     def load_min_data(self, symbol: str, trade_date: str) -> pl.DataFrame:
         cache_key = f"{symbol}_{pd.to_datetime(str(trade_date)).strftime('%Y')}"
         if cache_key in self._min_cache:
             return self._min_cache[cache_key]
 
-        path = self._min_file_path(symbol, str(trade_date))
-        if not path.exists():
+        path = self._resolve_min_file_path(symbol, str(trade_date))
+        if path is None or not path.exists():
             frame = pl.DataFrame()
         else:
             try:
@@ -189,31 +488,312 @@ class DataProcessor:
         self._min_cache[cache_key] = frame
         return frame
 
-    def _find_first_touch_snapshot(self, tick_df: pl.DataFrame, limit_price: float) -> Optional[Dict]:
+    def load_min_data(self, symbol: str, trade_date: str) -> pl.DataFrame:
+        cache_key = f"{symbol}_{pd.to_datetime(str(trade_date)).strftime('%Y')}"
+        if cache_key in self._min_cache:
+            return self._min_cache[cache_key]
+
+        path = self._resolve_min_file_path(symbol, str(trade_date))
+        if path is None or not path.exists():
+            frame = pl.DataFrame()
+        else:
+            try:
+                raw_frame = pl.read_parquet(str(path))
+                rename_map = {
+                    "代码": "symbol_raw",
+                    "浠ｇ爜": "symbol_raw",
+                    "时间": "datetime",
+                    "鏃堕棿": "datetime",
+                    "开盘价": "open",
+                    "寮€鐩樹环": "open",
+                    "收盘价": "close",
+                    "最高价": "high",
+                    "鏈€楂樹环": "high",
+                    "最低价": "low",
+                    "鏈€浣庝环": "low",
+                    "成交量": "volume",
+                    "成交额": "amount",
+                    "涨幅": "pct_chg",
+                    "娑ㄥ箙": "pct_chg",
+                    "振幅": "amplitude",
+                    "鎸箙": "amplitude",
+                }
+                frame = raw_frame.rename(
+                    {old: new for old, new in rename_map.items() if old in raw_frame.columns}
+                ).with_columns(
+                    [
+                        pl.col("datetime").cast(pl.Utf8).str.to_datetime(strict=False),
+                        pl.lit(symbol).alias("symbol"),
+                        pl.col("close").alias("price"),
+                    ]
+                )
+            except Exception as e:
+                print(f"Warning: Failed to load min file {path}: {e}")
+                frame = pl.DataFrame()
+        self._min_cache[cache_key] = frame
+        return frame
+
+    def _find_first_touch_snapshot(
+        self,
+        tick_df: pl.DataFrame,
+        limit_price: float,
+        trigger_mode: str = "last_price_or_order_price",
+    ) -> Optional[Dict]:
         if tick_df.is_empty():
             return None
+
+        mode = (trigger_mode or "last_price_or_order_price").lower()
+        if mode in {"last_price", "last_price_only", "trade_price", "trade_price_only"}:
+            trigger_expr = pl.col("current") >= limit_price
+        elif mode in {"order_price", "order_price_only", "limit_order", "limit_order_only"}:
+            trigger_expr = pl.col("b1_p") >= limit_price
+        elif mode in {"last_price_or_order_price", "last_or_order", "current_or_order"}:
+            trigger_expr = (pl.col("current") >= limit_price) | (pl.col("b1_p") >= limit_price)
+        else:
+            raise ValueError(
+                "Unsupported event_trigger_mode "
+                f"{trigger_mode!r}; expected last_price_only, order_price_only, "
+                "or last_price_or_order_price."
+            )
 
         tick_intraday = tick_df.filter(
             (pl.col("datetime").dt.hour() >= 9)
             & ((pl.col("datetime").dt.hour() > 9) | (pl.col("datetime").dt.minute() >= 30))
-            & (
-                (pl.col("current") >= limit_price)
-                | (pl.col("a1_p") >= limit_price)
-                | (pl.col("b1_p") >= limit_price)
-            )
-        ).sort("datetime")
+            & trigger_expr
+        ).head(1)
 
         if tick_intraday.is_empty():
             return None
 
         return tick_intraday.row(0, named=True)
 
-    def build_event_dataset(self, feature_engineer) -> pl.DataFrame:
-        day_df = self.load_day_data().sort(["symbol", "datetime"]).with_columns(
+    def _limit_ratio_expr(self) -> pl.Expr:
+        digits = pl.col("symbol").cast(pl.Utf8).str.extract(r"(\d{6})", 1).fill_null("")
+        return (
+            pl.when(
+                digits.str.starts_with("300")
+                | digits.str.starts_with("301")
+                | digits.str.starts_with("688")
+            )
+            .then(0.20)
+            .otherwise(0.10)
+        )
+
+    def _add_daily_event_context(self, day_df: pl.DataFrame) -> pl.DataFrame:
+        feature_cols = [
+            "prior_limit_up_streak",
+            "board_position",
+            "market_limit_up_count",
+            "market_limit_up_ratio",
+            "market_close_limit_up_count",
+            "market_close_limit_up_ratio",
+            "market_up_count",
+            "market_up_ratio",
+            "market_total_count",
+            "prev_market_max_close_limit_streak",
+        ]
+        base_df = day_df.drop([col for col in feature_cols if col in day_df.columns])
+        required = {"symbol", "trade_date", "pre_close", "high"}
+        close_col = "close" if "close" in base_df.columns else "price" if "price" in base_df.columns else None
+        if not required.issubset(set(base_df.columns)) or close_col is None:
+            return base_df.with_columns([pl.lit(np.nan).alias(col) for col in feature_cols])
+
+        limit_price = (pl.col("pre_close").cast(pl.Float64) * (1.0 + self._limit_ratio_expr())).round(2)
+        prepared = base_df.with_columns(
             [
-                pl.col("open").shift(-1).over("symbol").alias("next_open"),
-                pl.col("trade_date").shift(-1).over("symbol").alias("next_trade_date"),
+                limit_price.alias("__limit_price"),
+                (pl.col("high").cast(pl.Float64) + 1e-9 >= limit_price).alias("__is_limit_touch"),
+                (pl.col(close_col).cast(pl.Float64) + 1e-9 >= limit_price).alias("__is_close_limit_up"),
+                (pl.col(close_col).cast(pl.Float64) > pl.col("pre_close").cast(pl.Float64)).alias("__is_up"),
             ]
+        )
+
+        prepared = (
+            prepared.with_columns(
+                pl.col("__is_close_limit_up")
+                .not_()
+                .cast(pl.Int64)
+                .cum_sum()
+                .over("symbol")
+                .alias("__limit_break_id")
+            )
+            .with_columns(
+                pl.col("__is_close_limit_up")
+                .cast(pl.Int64)
+                .cum_sum()
+                .over(["symbol", "__limit_break_id"])
+                .alias("__close_limit_streak")
+            )
+            .with_columns(
+                pl.col("__close_limit_streak")
+                .shift(1)
+                .over("symbol")
+                .fill_null(0)
+                .cast(pl.Int64)
+                .alias("prior_limit_up_streak")
+            )
+            .with_columns(
+                pl.when(pl.col("__is_limit_touch"))
+                .then(pl.col("prior_limit_up_streak") + 1)
+                .otherwise(0)
+                .cast(pl.Int64)
+                .alias("board_position")
+            )
+        )
+
+        market = (
+            prepared.group_by("trade_date")
+            .agg(
+                [
+                    pl.len().alias("market_total_count"),
+                    pl.col("__is_limit_touch").cast(pl.Int64).sum().alias("market_limit_up_count"),
+                    pl.col("__is_close_limit_up").cast(pl.Int64).sum().alias("market_close_limit_up_count"),
+                    pl.col("__is_up").cast(pl.Int64).sum().alias("market_up_count"),
+                    pl.col("__close_limit_streak").max().alias("__market_max_close_limit_streak"),
+                ]
+            )
+            .sort("trade_date")
+            .with_columns(
+                [
+                    (pl.col("market_limit_up_count") / pl.col("market_total_count")).alias("market_limit_up_ratio"),
+                    (pl.col("market_close_limit_up_count") / pl.col("market_total_count")).alias("market_close_limit_up_ratio"),
+                    (pl.col("market_up_count") / pl.col("market_total_count")).alias("market_up_ratio"),
+                    pl.col("__market_max_close_limit_streak")
+                    .shift(1)
+                    .fill_null(0)
+                    .cast(pl.Int64)
+                    .alias("prev_market_max_close_limit_streak"),
+                ]
+            )
+            .drop("__market_max_close_limit_streak")
+        )
+
+        helper_cols = [
+            "__limit_price",
+            "__is_limit_touch",
+            "__is_close_limit_up",
+            "__is_up",
+            "__limit_break_id",
+            "__close_limit_streak",
+        ]
+        return prepared.join(market, on="trade_date", how="left").drop(helper_cols)
+
+    def _add_intraday_event_context(self, event_df: pl.DataFrame) -> pl.DataFrame:
+        feature_cols = ["market_prior_touch_count", "market_prior_touch_ratio"]
+        required = {"trade_date", "event_time"}
+        if event_df.is_empty():
+            return event_df
+        if not required.issubset(set(event_df.columns)):
+            return event_df.with_columns([pl.lit(np.nan).alias(col) for col in feature_cols])
+
+        event_df = event_df.drop([col for col in feature_cols if col in event_df.columns])
+        sort_cols = ["trade_date", "event_time"]
+        if "symbol" in event_df.columns:
+            sort_cols.append("symbol")
+
+        sorted_df = event_df.sort(sort_cols)
+        event_counts = (
+            sorted_df.group_by(["trade_date", "event_time"])
+            .agg(pl.len().alias("__events_at_time"))
+            .sort(["trade_date", "event_time"])
+            .with_columns(
+                (
+                    pl.col("__events_at_time").cum_sum().over("trade_date")
+                    - pl.col("__events_at_time")
+                )
+                .cast(pl.Float64)
+                .alias("market_prior_touch_count")
+            )
+            .drop("__events_at_time")
+        )
+
+        result = sorted_df.join(event_counts, on=["trade_date", "event_time"], how="left")
+        if "market_total_count" in result.columns:
+            result = result.with_columns(
+                pl.when(pl.col("market_total_count").cast(pl.Float64) > 0)
+                .then(pl.col("market_prior_touch_count") / pl.col("market_total_count").cast(pl.Float64))
+                .otherwise(np.nan)
+                .alias("market_prior_touch_ratio")
+            )
+        else:
+            result = result.with_columns(pl.lit(np.nan).alias("market_prior_touch_ratio"))
+
+        return result
+
+    def _missing_report_paths(self) -> Tuple[Path, Path]:
+        raw_path = getattr(self.config, "missing_report_path", None)
+        if raw_path:
+            base_path = Path(raw_path)
+        else:
+            base_path = Path("results") / "missing_data_report.csv"
+
+        if base_path.suffix:
+            detail_path = base_path.with_name(f"{base_path.stem}_detail{base_path.suffix}")
+            summary_path = base_path.with_name(f"{base_path.stem}_summary{base_path.suffix}")
+        else:
+            detail_path = base_path / "missing_data_detail.csv"
+            summary_path = base_path / "missing_data_summary.csv"
+        return detail_path, summary_path
+
+    def _write_missing_data_report(self, records: List[Dict], summary: Dict) -> None:
+        detail_path, summary_path = self._missing_report_paths()
+        detail_path.parent.mkdir(parents=True, exist_ok=True)
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+
+        summary_frame = pl.DataFrame([summary])
+        summary_frame.write_csv(summary_path)
+
+        detail_schema = {
+            "symbol": pl.Utf8,
+            "trade_date": pl.Utf8,
+            "source": pl.Utf8,
+            "reason": pl.Utf8,
+        }
+        detail_frame = pl.DataFrame(records, schema=detail_schema) if records else pl.DataFrame(schema=detail_schema)
+        detail_frame.write_csv(detail_path)
+        print(f"Missing data summary written to {summary_path}")
+        print(f"Missing data detail written to {detail_path}")
+
+    def _daily_limit_candidate_frame(self, day_df: pl.DataFrame) -> Tuple[pl.DataFrame, int]:
+        symbol_digits = pl.col("symbol").cast(pl.Utf8).str.replace_all(r"\D", "")
+        is_bj = (
+            symbol_digits.str.starts_with("4")
+            | symbol_digits.str.starts_with("8")
+            | symbol_digits.str.starts_with("92")
+        )
+        trade_date_key = (
+            pl.col("trade_date")
+            .cast(pl.Utf8)
+            .str.replace_all(r"\D", "")
+            .str.slice(0, 8)
+        )
+        limit_price = (pl.col("pre_close").cast(pl.Float64) * (1.0 + self._limit_ratio_expr())).round(2)
+
+        enriched = day_df.with_columns(
+            [
+                is_bj.alias("_is_bj"),
+                trade_date_key.alias("_trade_date"),
+                trade_date_key.cast(pl.Int64, strict=False).alias("_trade_date_key"),
+                limit_price.alias("_limit_price"),
+            ]
+        )
+        non_hs_skipped = enriched.filter(pl.col("_is_bj")).height
+        limit_candidates = enriched.filter(
+            (~pl.col("_is_bj"))
+            & pl.col("_trade_date_key").is_not_null()
+            & (pl.col("high").cast(pl.Float64) + 1e-9 >= pl.col("_limit_price"))
+        )
+        return limit_candidates, non_hs_skipped
+
+    def build_event_dataset(self, feature_engineer) -> pl.DataFrame:
+        day_df = (
+            self._add_daily_event_context(self.load_day_data().sort(["symbol", "datetime"]))
+            .with_columns(
+                [
+                    pl.col("open").shift(-1).over("symbol").alias("next_open"),
+                    pl.col("trade_date").shift(-1).over("symbol").alias("next_trade_date"),
+                ]
+            )
         )
 
         end_date = pd.to_datetime(self.config.test_end_date)
@@ -222,23 +802,96 @@ class DataProcessor:
             & (pl.col("datetime") <= end_date)
             & pl.col("next_open").is_not_null()
         )
+        limit_candidate_df, non_hs_skipped = self._daily_limit_candidate_frame(candidate_df)
 
         rows: List[Dict] = []
-        for day_row in candidate_df.iter_rows(named=True):
-            symbol = day_row["symbol"]
-            trade_date = str(day_row["trade_date"])
-            limit_price = self.compute_limit_price(day_row["pre_close"], symbol)
+        missing_records: List[Dict] = []
+        summary: Dict[str, int | str] = {
+            "train_start_date": self.config.train_start_date,
+            "train_end_date": self.config.train_end_date,
+            "test_start_date": self.config.test_start_date,
+            "test_end_date": self.config.test_end_date,
+            "event_trigger_mode": str(getattr(self.config, "event_trigger_mode", "last_price_or_order_price")),
+            "candidate_rows": candidate_df.height,
+            "daily_limit_candidates": limit_candidate_df.height,
+            "missing_tick": 0,
+            "no_tick_touch": 0,
+            "missing_minute": 0,
+            "missing_l2": 0,
+            "empty_l2_event_day": 0,
+            "l2_event_source": 0,
+            "tick_event_source": 0,
+            "derived_minute_from_l2": 0,
+            "non_hs_skipped": non_hs_skipped,
+            "touch_time_filtered": 0,
+            "l2_baseline_excluded": 0,
+            "events_built": 0,
+        }
 
-            # Use daily high as a cheap pre-filter, then use tick to locate the real touch time.
-            if float(day_row["high"]) + 1e-9 < limit_price:
+        def add_missing(symbol_value: str, date_value: str, source: str, reason: str) -> None:
+            summary[source] = int(summary.get(source, 0)) + 1
+            missing_records.append(
+                {
+                    "symbol": symbol_value,
+                    "trade_date": date_value,
+                    "source": source,
+                    "reason": reason,
+                }
+            )
+
+        total_candidates = limit_candidate_df.height
+        progress_interval = int(getattr(self.config, "event_progress_interval", 1000) or 1000)
+        for scan_index, day_row in enumerate(limit_candidate_df.iter_rows(named=True), start=1):
+            if scan_index % progress_interval == 0:
+                print(
+                    "Event scan progress: "
+                    f"{scan_index}/{total_candidates} rows, "
+                    f"daily_limit_candidates={summary['daily_limit_candidates']}, "
+                    f"events_built={summary['events_built']}, "
+                    f"l2_baseline_excluded={summary['l2_baseline_excluded']}, "
+                    f"derived_minute_from_l2={summary['derived_minute_from_l2']}",
+                    flush=True,
+                )
+
+            symbol = day_row["symbol"]
+            trade_date = str(day_row["_trade_date"])
+            trade_date_key = int(day_row["_trade_date_key"])
+            limit_price = float(day_row["_limit_price"])
+
+            l2_df = self.load_l2_data(symbol, trade_date)
+            l2_market_df = self._l2_to_market_frame(l2_df, trade_date_key)
+            if l2_market_df.is_empty():
+                add_missing(symbol, trade_date, "missing_l2", "excluded from L2 baseline: no event-date L2 order rows")
+                summary["l2_baseline_excluded"] = int(summary["l2_baseline_excluded"]) + 1
                 continue
 
-            tick_df = self.load_tick_data(symbol, trade_date)
-            touch = self._find_first_touch_snapshot(tick_df, limit_price)
+            tick_df = l2_market_df
+            summary["l2_event_source"] = int(summary["l2_event_source"]) + 1
+            if tick_df.is_empty() or "datetime" not in tick_df.columns:
+                add_missing(symbol, trade_date, "missing_tick", "L2-derived tick frame missing datetime")
+                continue
+
+            touch = self._find_first_touch_snapshot(
+                tick_df,
+                limit_price,
+                trigger_mode=getattr(self.config, "event_trigger_mode", "last_price_or_order_price"),
+            )
             if touch is None:
+                summary["no_tick_touch"] = int(summary["no_tick_touch"]) + 1
                 continue
 
             event_dt = touch["datetime"]
+            min_touch_time = getattr(self.config, "event_min_touch_time", None)
+            max_touch_time = getattr(self.config, "event_max_touch_time", None)
+            if min_touch_time or max_touch_time:
+                event_time = event_dt.time()
+                if min_touch_time and event_time < pd.to_datetime(min_touch_time).time():
+                    summary["touch_time_filtered"] = int(summary["touch_time_filtered"]) + 1
+                    continue
+                if max_touch_time and event_time > pd.to_datetime(max_touch_time).time():
+                    summary["touch_time_filtered"] = int(summary["touch_time_filtered"]) + 1
+                    continue
+
             window_start = event_dt - timedelta(minutes=self.config.event_window_minutes)
             tick_window = tick_df.filter(
                 (pl.col("datetime") >= window_start) & (pl.col("datetime") <= event_dt)
@@ -250,15 +903,34 @@ class DataProcessor:
             )
 
             min_df = self.load_min_data(symbol, trade_date)
-            min_window = min_df.filter(
-                (pl.col("datetime") >= window_start.replace(second=0, microsecond=0))
-                & (pl.col("datetime") <= event_dt)
-            )
+            if min_df.is_empty() or "datetime" not in min_df.columns:
+                derived_min_df = self._l2_to_minute_frame(l2_market_df)
+                if derived_min_df.is_empty():
+                    add_missing(symbol, trade_date, "missing_minute", "minute missing and L2 could not derive minute bars")
+                    min_window = pl.DataFrame()
+                else:
+                    summary["derived_minute_from_l2"] = int(summary["derived_minute_from_l2"]) + 1
+                    min_df = derived_min_df
+                    event_minute = event_dt.replace(second=0, microsecond=0)
+                    min_window = min_df.filter(
+                        (pl.col("datetime") >= window_start.replace(second=0, microsecond=0))
+                        & (pl.col("datetime") < event_minute)
+                    )
+            else:
+                event_minute = event_dt.replace(second=0, microsecond=0)
+                min_window = min_df.filter(
+                    (pl.col("datetime") >= window_start.replace(second=0, microsecond=0))
+                    & (pl.col("datetime") < event_minute)
+                )
 
-            l2_df = self.load_l2_data(symbol)
             l2_window = pl.DataFrame()
-            if not l2_df.is_empty():
-                day_l2 = l2_df.filter(pl.col("TradingDay") == int(trade_date))
+            if l2_df.is_empty() or "TradingDay" not in l2_df.columns:
+                if not l2_market_df.is_empty():
+                    add_missing(symbol, trade_date, "missing_l2", "L2 order file missing, unreadable, or missing TradingDay")
+            else:
+                day_l2 = l2_df.filter(pl.col("TradingDay") == trade_date_key)
+                if day_l2.is_empty():
+                    add_missing(symbol, trade_date, "empty_l2_event_day", "L2 files exist but contain no rows for event date")
                 event_order_time = int(event_dt.strftime("%H%M%S")) * 1000
                 start_order_time = int(window_start.strftime("%H%M%S")) * 1000
                 l2_window = day_l2.filter(
@@ -271,6 +943,18 @@ class DataProcessor:
                 l2_window=l2_window,
                 event_snapshot=touch,
                 limit_price=limit_price,
+                day_context={
+                    "prior_limit_up_streak": day_row.get("prior_limit_up_streak"),
+                    "board_position": day_row.get("board_position"),
+                    "market_limit_up_count": day_row.get("market_limit_up_count"),
+                    "market_limit_up_ratio": day_row.get("market_limit_up_ratio"),
+                    "market_close_limit_up_count": day_row.get("market_close_limit_up_count"),
+                    "market_close_limit_up_ratio": day_row.get("market_close_limit_up_ratio"),
+                    "market_up_count": day_row.get("market_up_count"),
+                    "market_up_ratio": day_row.get("market_up_ratio"),
+                    "market_total_count": day_row.get("market_total_count"),
+                    "prev_market_max_close_limit_streak": day_row.get("prev_market_max_close_limit_streak"),
+                },
             )
             features.update(
                 {
@@ -283,8 +967,10 @@ class DataProcessor:
                 }
             )
             rows.append(features)
+            summary["events_built"] = int(summary["events_built"]) + 1
 
-        return pl.DataFrame(rows) if rows else pl.DataFrame()
+        self._write_missing_data_report(missing_records, summary)
+        return self._add_intraday_event_context(pl.DataFrame(rows)) if rows else pl.DataFrame()
 
     def load_adjustment_factors(
         self,

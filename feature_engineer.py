@@ -36,6 +36,27 @@ class FeatureEngineer:
         self.register_feature("active_buy_ratio", self._calculate_active_buy_ratio)
         self.register_feature("large_order_ratio", self._calculate_large_order_ratio)
         self.register_feature("net_inflow", self._calculate_net_inflow)
+        self.register_feature("l2_limit_count_ratio", self._calculate_identity_feature)
+        self.register_feature("l2_limit_volume_ratio", self._calculate_identity_feature)
+        self.register_feature("l2_buy_count_ratio", self._calculate_identity_feature)
+        self.register_feature("l2_buy_volume_ratio", self._calculate_identity_feature)
+        self.register_feature("l2_net_order_flow", self._calculate_identity_feature)
+        self.register_feature("l2_large_order_volume_ratio", self._calculate_identity_feature)
+        self.register_feature("touch_time_minutes", self._calculate_identity_feature)
+        self.register_feature("touch_seconds_from_open_norm", self._calculate_identity_feature)
+        self.register_feature("touch_time_bucket", self._calculate_identity_feature)
+        self.register_feature("prior_limit_up_streak", self._calculate_identity_feature)
+        self.register_feature("board_position", self._calculate_identity_feature)
+        self.register_feature("market_limit_up_count", self._calculate_identity_feature)
+        self.register_feature("market_limit_up_ratio", self._calculate_identity_feature)
+        self.register_feature("market_close_limit_up_count", self._calculate_identity_feature)
+        self.register_feature("market_close_limit_up_ratio", self._calculate_identity_feature)
+        self.register_feature("market_up_count", self._calculate_identity_feature)
+        self.register_feature("market_up_ratio", self._calculate_identity_feature)
+        self.register_feature("market_total_count", self._calculate_identity_feature)
+        self.register_feature("market_prior_touch_count", self._calculate_identity_feature)
+        self.register_feature("market_prior_touch_ratio", self._calculate_identity_feature)
+        self.register_feature("prev_market_max_close_limit_streak", self._calculate_identity_feature)
 
         self.register_feature("ma_slope", self._calculate_ma_slope)
         self.register_feature("rsi_short", self._calculate_rsi_short)
@@ -258,6 +279,9 @@ class FeatureEngineer:
             return np.nan
         return float(np.sum(self._column_values(df, "buy_amount")) - np.sum(self._column_values(df, "sell_amount")))
 
+    def _calculate_identity_feature(self, df: pl.DataFrame, **kwargs) -> float:
+        return np.nan
+
     def _calculate_ma_slope(self, df: pl.DataFrame, ma_windows: List[int] = None, **kwargs) -> float:
         ma_windows = ma_windows or [5]
         window = ma_windows[0]
@@ -299,6 +323,7 @@ class FeatureEngineer:
         l2_window: pl.DataFrame,
         event_snapshot: Dict,
         limit_price: float,
+        day_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, float]:
         features: Dict[str, float] = {}
 
@@ -358,14 +383,69 @@ class FeatureEngineer:
         if not l2_window.is_empty():
             l2_features = l2_window.rename({"Volume": "volume"})
             features["large_order_ratio"] = self._calculate_large_order_ratio(l2_features)
-            features["limit_order_count"] = float(l2_window.filter(pl.col("Price") == int(round(limit_price * 100))).height)
-            features["limit_order_volume"] = float(
-                l2_window.filter(pl.col("Price") == int(round(limit_price * 100))).select(pl.col("Volume").sum()).item() or 0.0
-            )
+            limit_order_df = l2_window.filter(pl.col("Price") == int(round(limit_price * 100)))
+            total_count = float(l2_window.height)
+            total_volume = float(l2_window.select(pl.col("Volume").sum()).item() or 0.0)
+            limit_count = float(limit_order_df.height)
+            limit_volume = float(limit_order_df.select(pl.col("Volume").sum()).item() or 0.0)
+            buy_window = l2_window.filter(pl.col("OrderType") >= 0)
+            buy_count = float(buy_window.height)
+            buy_volume = float(buy_window.select(pl.col("Volume").sum()).item() or 0.0)
+            sell_volume = max(total_volume - buy_volume, 0.0)
+            avg_volume = float(l2_window.select(pl.col("Volume").mean()).item() or 0.0)
+            large_volume = float(
+                l2_window.filter(pl.col("Volume") > avg_volume * 2).select(pl.col("Volume").sum()).item() or 0.0
+            ) if avg_volume > 0 else 0.0
+
+            features["limit_order_count"] = limit_count
+            features["limit_order_volume"] = limit_volume
+            features["l2_limit_count_ratio"] = limit_count / total_count if total_count > 0 else np.nan
+            features["l2_limit_volume_ratio"] = limit_volume / total_volume if total_volume > 0 else np.nan
+            features["l2_buy_count_ratio"] = buy_count / total_count if total_count > 0 else np.nan
+            features["l2_buy_volume_ratio"] = buy_volume / total_volume if total_volume > 0 else np.nan
+            features["l2_net_order_flow"] = (buy_volume - sell_volume) / total_volume if total_volume > 0 else np.nan
+            features["l2_large_order_volume_ratio"] = large_volume / total_volume if total_volume > 0 else np.nan
         else:
             features["large_order_ratio"] = np.nan
             features["limit_order_count"] = 0.0
             features["limit_order_volume"] = 0.0
+            features["l2_limit_count_ratio"] = np.nan
+            features["l2_limit_volume_ratio"] = np.nan
+            features["l2_buy_count_ratio"] = np.nan
+            features["l2_buy_volume_ratio"] = np.nan
+            features["l2_net_order_flow"] = np.nan
+            features["l2_large_order_volume_ratio"] = np.nan
+
+        event_time = event_snapshot.get("datetime")
+        if event_time is not None:
+            features["touch_time_minutes"] = float(event_time.hour * 60 + event_time.minute + event_time.second / 60)
+            seconds_from_open = (
+                (event_time.hour - 9) * 3600
+                + (event_time.minute - 30) * 60
+                + event_time.second
+                + event_time.microsecond / 1_000_000
+            )
+            features["touch_seconds_from_open_norm"] = float(seconds_from_open / (2 * 60 * 60))
+            features["touch_time_bucket"] = _touch_time_bucket(event_time)
+        else:
+            features["touch_time_minutes"] = np.nan
+            features["touch_seconds_from_open_norm"] = np.nan
+            features["touch_time_bucket"] = np.nan
+
+        day_context = day_context or {}
+        for name in [
+            "prior_limit_up_streak",
+            "board_position",
+            "market_limit_up_count",
+            "market_limit_up_ratio",
+            "market_close_limit_up_count",
+            "market_close_limit_up_ratio",
+            "market_up_count",
+            "market_up_ratio",
+            "market_total_count",
+            "prev_market_max_close_limit_streak",
+        ]:
+            features[name] = _safe_numeric(day_context.get(name))
 
         ma_window = (self.config.feature_params.get("ma_windows") or [5])[0]
         ma_source = self._select_ta_source(minute_features, tick_features, ma_window + 1)
@@ -387,6 +467,7 @@ class FeatureEngineer:
             "event_snapshot": event_snapshot,
             "limit_price": limit_price,
             "feature_config": self.config,
+            "day_context": day_context,
         }
         for name in self.event_feature_names:
             func = self.feature_registry.get(name)
@@ -406,7 +487,19 @@ class FeatureEngineer:
         return features
 
     def get_feature_names(self) -> List[str]:
-        return list(self.feature_registry.keys()) + ["limit_order_count", "limit_order_volume"]
+        configured_features = (
+            list(getattr(self.config, "price_features", []))
+            + list(getattr(self.config, "volume_features", []))
+            + list(getattr(self.config, "orderbook_features", []))
+            + list(getattr(self.config, "flow_features", []))
+            + list(getattr(self.config, "technical_features", []))
+            + list(getattr(self.config, "event_features", []))
+        )
+        return [
+            feature_name
+            for feature_name in dict.fromkeys(configured_features)
+            if feature_name in self.feature_registry or feature_name in {"limit_order_count", "limit_order_volume"}
+        ]
 
     def aggregate_by_event(
         self,
@@ -435,6 +528,39 @@ class FeatureEngineer:
             for func in funcs:
                 agg_exprs.append(getattr(pl.col(col), func)().alias(f"{col}_{func}"))
         return df.group_by(group_col).agg(agg_exprs)
+
+
+def _safe_numeric(value: Any) -> float:
+    if value is None:
+        return np.nan
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return np.nan
+    return result if np.isfinite(result) else np.nan
+
+
+def _touch_time_bucket(event_time: Any) -> float:
+    minutes = (
+        event_time.hour * 60
+        + event_time.minute
+        + event_time.second / 60.0
+        + event_time.microsecond / 60_000_000.0
+    )
+    buckets = [
+        (9 * 60 + 30, 10 * 60),
+        (10 * 60, 10 * 60 + 30),
+        (10 * 60 + 30, 11 * 60),
+        (11 * 60, 11 * 60 + 30),
+        (13 * 60, 13 * 60 + 30),
+        (13 * 60 + 30, 14 * 60),
+        (14 * 60, 14 * 60 + 30),
+        (14 * 60 + 30, 15 * 60),
+    ]
+    for index, (start, end) in enumerate(buckets):
+        if start <= minutes < end:
+            return float(index)
+    return np.nan
 
 
 def _sanitize_event_tick_window(tick_window: Optional[pl.DataFrame]) -> pl.DataFrame:

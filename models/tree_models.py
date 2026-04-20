@@ -10,6 +10,12 @@ try:
 except ImportError:
     HAS_LIGHTGBM = False
 
+try:
+    import xgboost as xgb
+    HAS_XGBOOST = True
+except ImportError:
+    HAS_XGBOOST = False
+
 
 class RandomForestModel(BaseModel, model_name="random_forest"):
     
@@ -146,6 +152,71 @@ class LightGBMModel(BaseModel, model_name="lightgbm"):
         
         importance = self.model.booster_.feature_importance(importance_type="gain")
         
+        return pd.DataFrame({
+            "feature": self.feature_names_,
+            "importance": importance
+        }).sort_values("importance", ascending=False)
+
+
+class XGBoostModel(BaseModel, model_name="xgboost"):
+
+    def __init__(
+        self,
+        model_params: Optional[Dict[str, Any]] = None,
+        random_state: int = 42
+    ):
+        if not HAS_XGBOOST:
+            raise ImportError("XGBoost is not installed. Install it with: pip install xgboost")
+
+        default_params = {
+            "n_estimators": 400,
+            "max_depth": 4,
+            "learning_rate": 0.03,
+            "subsample": 0.8,
+            "colsample_bytree": 0.8,
+            "min_child_weight": 5,
+            "reg_alpha": 0.0,
+            "reg_lambda": 1.0,
+            "objective": "reg:squarederror",
+            "tree_method": "hist",
+            "n_jobs": -1,
+        }
+        if model_params:
+            default_params.update(model_params)
+
+        super().__init__(default_params, random_state)
+
+    def fit(
+        self,
+        X: pd.DataFrame,
+        y: pd.Series,
+        eval_set: Optional[tuple] = None
+    ) -> "XGBoostModel":
+        self.feature_names_ = X.columns.tolist()
+
+        fit_params = {}
+        if eval_set is not None:
+            fit_params["eval_set"] = [eval_set]
+            fit_params["verbose"] = False
+
+        self.model = xgb.XGBRegressor(
+            random_state=self.random_state,
+            **self.model_params
+        )
+        self.model.fit(X, y, **fit_params)
+        self.is_fitted = True
+
+        return self
+
+    def predict(self, X: pd.DataFrame) -> np.ndarray:
+        self.check_is_fitted()
+        return self.model.predict(X)
+
+    def _get_builtin_importance(self) -> pd.DataFrame:
+        self.check_is_fitted()
+
+        importance = self.model.feature_importances_
+
         return pd.DataFrame({
             "feature": self.feature_names_,
             "importance": importance

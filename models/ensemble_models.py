@@ -11,6 +11,12 @@ try:
 except ImportError:
     HAS_LIGHTGBM = False
 
+try:
+    from models.tree_models import XGBoostModel
+    HAS_XGBOOST = True
+except ImportError:
+    HAS_XGBOOST = False
+
 
 class LinearEnsembleModel(BaseModel, model_name="linear_ensemble"):
     
@@ -118,8 +124,6 @@ class TreeEnsembleModel(BaseModel, model_name="tree_ensemble"):
     ):
         super().__init__(model_params, random_state)
         
-        self.weights = weights or [0.5, 0.5]
-        
         self.models = {
             "random_forest": RandomForestModel(
                 model_params=self.model_params.get("random_forest", {}),
@@ -132,8 +136,14 @@ class TreeEnsembleModel(BaseModel, model_name="tree_ensemble"):
                 model_params=self.model_params.get("lightgbm", {}),
                 random_state=random_state
             )
-        else:
-            self.weights = [1.0]
+
+        if HAS_XGBOOST:
+            self.models["xgboost"] = XGBoostModel(
+                model_params=self.model_params.get("xgboost", {}),
+                random_state=random_state
+            )
+
+        self.weights = weights or [1.0 / len(self.models)] * len(self.models)
     
     def fit(
         self,

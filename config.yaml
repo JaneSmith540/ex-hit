@@ -1,14 +1,15 @@
 data:
-  data_path: "D:/数据样例/day/2025"
-  day_path: "D:/数据样例/day/2025"
-  tick_path: "D:/数据样例/tick"
-  l2_order_path: "D:/数据样例/l2_order/2025"
-  min_path: "D:/数据样例/min_前复权/2025_1min"
-  adj_factor_path: "D:/数据样例"
-  train_start_date: "2025-01-01"
-  train_end_date: "2025-01-31"
-  test_start_date: "2025-02-01"
-  test_end_date: "2025-02-28"
+  data_path: "/mnt/nvme_raid0/experiment_data/day/day_all_a_raw_from_tick_20210223_20230529.parquet"
+  day_path: "/mnt/nvme_raid0/experiment_data/day/day_all_a_raw_from_tick_20210223_20230529.parquet"
+  tick_path: "/mnt/nvme_raid0/experiment_data/tick/stock_tick_month"
+  l2_order_path: "/mnt/nvme_raid0/experiment_data/l2/order"
+  min_path: "/mnt/nvme_raid0/experiment_data/min/1m_hfq"
+  adj_factor_path: "/mnt/nvme_raid0/experiment_data/adj_factor"
+  missing_report_path: "/mnt/nvme_raid0/experiment_data/logs/missing_data_report.csv"
+  train_start_date: "2021-06-01"
+  train_end_date: "2022-12-30"
+  test_start_date: "2023-01-03"
+  test_end_date: "2023-05-29"
   limit_up_threshold: 0.095
   time_window_before_limit: 300
   event_window_minutes: 5

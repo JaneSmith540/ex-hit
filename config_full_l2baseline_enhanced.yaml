@@ -1,0 +1,91 @@
+data:
+  data_path: "/mnt/nvme_raid0/experiment_data/day/day_all_a_raw_from_tick_20210223_20230529.parquet"
+  day_path: "/mnt/nvme_raid0/experiment_data/day/day_all_a_raw_from_tick_20210223_20230529.parquet"
+  tick_path: "/mnt/nvme_raid0/experiment_data/tick/stock_tick_month"
+  l2_order_path: "/mnt/nvme_raid0/experiment_data/l2/order"
+  min_path: "/mnt/nvme_raid0/experiment_data/min/1m_hfq"
+  adj_factor_path: "/mnt/nvme_raid0/experiment_data/adj_factor"
+  missing_report_path: "/mnt/nvme_raid0/experiment_data/logs/missing_data_full_l2baseline_enhanced.csv"
+  train_start_date: "2021-06-01"
+  train_end_date: "2022-12-30"
+  test_start_date: "2023-01-03"
+  test_end_date: "2023-05-29"
+  limit_up_threshold: 0.095
+  time_window_before_limit: 300
+  event_window_minutes: 5
+  event_min_touch_time: "09:35:00"
+  event_max_touch_time: "14:30:00"
+  min_volume_threshold: 100000
+  tushare_token: "d83605429b7463a375ed3b36271d1b2ff7b7bd937920eb8a30fcd690"
+  enable_remote_adj_factor_fallback: false
+
+feature:
+  price_features:
+    - return_rate
+    - return_speed
+    - volatility
+    - price_position
+  volume_features:
+    - volume_ratio
+    - volume_surge
+  orderbook_features: []
+  flow_features:
+    - active_buy_ratio
+    - net_inflow
+    - large_order_ratio
+    - l2_limit_count_ratio
+    - l2_limit_volume_ratio
+    - l2_buy_count_ratio
+    - l2_buy_volume_ratio
+    - l2_net_order_flow
+    - l2_large_order_volume_ratio
+  technical_features:
+    - ma_slope
+    - rsi_short
+    - momentum
+  event_features:
+    - limit_order_count
+    - limit_order_volume
+    - touch_time_minutes
+    - touch_seconds_from_open_norm
+    - touch_time_bucket
+    - prior_limit_up_streak
+    - board_position
+    - market_prior_touch_count
+    - market_prior_touch_ratio
+    - market_total_count
+    - prev_market_max_close_limit_streak
+  feature_params:
+    ma_windows:
+      - 5
+      - 10
+      - 20
+    rsi_period: 14
+    volume_ma_window: 20
+
+model:
+  model_name: "lightgbm"
+  model_params: {}
+  cv_folds: 5
+  random_state: 42
+  use_standardization: true
+
+train:
+  validation_ratio: 0.2
+  early_stopping_rounds: 50
+  metric: "mse"
+  save_model: true
+  model_save_path: "saved_models/"
+  rolling_train_days: 5
+
+eval:
+  metrics:
+    - mse
+    - mae
+    - r2
+    - ic
+    - rank_ic
+  feature_importance_method: "built_in"
+  plot_results: false
+  save_results: true
+  results_save_path: "results/"

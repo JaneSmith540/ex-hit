@@ -5,7 +5,7 @@ from models.linear_models import (
     RidgeModel,
     ElasticNetModel
 )
-from models.tree_models import RandomForestModel, LightGBMModel
+from models.tree_models import RandomForestModel, LightGBMModel, XGBoostModel
 from models.ensemble_models import (
     LinearEnsembleModel,
     TreeEnsembleModel,
@@ -43,6 +43,11 @@ AVAILABLE_MODELS = {
         "module": "models.tree_models",
         "type": "tree",
     },
+    "xgboost": {
+        "class_name": "XGBoostModel",
+        "module": "models.tree_models",
+        "type": "tree",
+    },
     "linear_ensemble": {
         "class_name": "LinearEnsembleModel",
         "module": "models.ensemble_models",
@@ -70,6 +75,7 @@ __all__ = [
     "ElasticNetModel",
     "RandomForestModel",
     "LightGBMModel",
+    "XGBoostModel",
     "LinearEnsembleModel",
     "TreeEnsembleModel",
     "WeightedEnsembleModel",

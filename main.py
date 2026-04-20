@@ -74,9 +74,12 @@ class Experiment:
         self.X_test: Optional[pl.DataFrame] = None
         self.y_test: Optional[pl.Series] = None
     
-    def load_and_process_data(self) -> Dict[str, Any]:
-        print("Building event dataset from day/tick/l2/min sources...")
-        event_df = self.data_processor.build_event_dataset(self.feature_engineer)
+    def load_and_process_data(self, event_df: Optional[pl.DataFrame] = None) -> Dict[str, Any]:
+        if event_df is None:
+            print("Building event dataset from day/tick/l2/min sources...")
+            event_df = self.data_processor.build_event_dataset(self.feature_engineer)
+        else:
+            print(f"Using prebuilt event dataset with {event_df.height} rows.")
         if event_df.is_empty():
             print("No touch events found.")
             return {"n_train": 0, "n_test": 0, "n_features": 0}
@@ -95,21 +98,30 @@ class Experiment:
             return {"n_train": train_raw.height, "n_test": test_raw.height, "n_features": 0}
 
         train_features = self._select_usable_feature_columns(train_raw, feature_cols, require_variance=True)
-        test_features = self._select_usable_feature_columns(test_raw, feature_cols, require_variance=False)
-        available_features = [col for col in train_features if col in test_features]
+        available_features = train_features
         if not available_features:
-            print("No common usable features found across train/test splits.")
+            print("No usable training features found.")
             return {"n_train": train_raw.height, "n_test": test_raw.height, "n_features": 0}
 
+        train_before_clean = train_raw.height
+        test_before_clean = test_raw.height
         train_df = self.data_processor.clean_data(
-            train_raw.select(["trade_date", *available_features, "next_open_return"])
+            train_raw.select(["trade_date", *available_features, "next_open_return"]),
+            remove_outliers=False,
         )
         test_df = self.data_processor.clean_data(
-            test_raw.select(["trade_date", *available_features, "next_open_return"])
+            test_raw.select(["trade_date", *available_features, "next_open_return"]),
+            remove_outliers=False,
         )
         if train_df.is_empty() or test_df.is_empty():
             print("Train or test event set is empty after cleaning.")
             return {"n_train": train_df.height, "n_test": test_df.height, "n_features": len(available_features)}
+        print(
+            "Cleaning flow: "
+            f"train {train_before_clean}->{train_df.height}, "
+            f"test {test_before_clean}->{test_df.height}; "
+            "removed only null/non-finite rows for model inputs."
+        )
 
         self.model_df = pl.concat([train_df, test_df], how="vertical_relaxed").sort("trade_date")
         self.feature_names = available_features
@@ -122,6 +134,8 @@ class Experiment:
             "n_train": self.X_train.height,
             "n_test": self.X_test.height,
             "n_features": len(available_features),
+            "n_train_raw": train_before_clean,
+            "n_test_raw": test_before_clean,
             "feature_names": available_features
         }
 
